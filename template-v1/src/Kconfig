@@ -1,0 +1,17 @@
+menu "main"
+
+config TEMPLATE_EXTRA_CFLAGS
+	string "extra cflags"
+	default ""
+
+config TEMPLATE_EXTRA_LDFLAGS
+	string "extra ldflags"
+	default ""
+
+config TEMPLATE_LOCK_PATH
+	string "Default file lock path"
+	default "/var/run/.template.deleteme.lock"
+
+endmenu
+
+#;

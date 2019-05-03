@@ -1,0 +1,83 @@
+#
+# Toolchain (TC)
+# 
+menu "Toolchain (TC) configurations"
+
+comment "Target device toolchain (cross utilities)"
+
+#
+# Target device toolchain
+#
+config TC_PFX
+	string "Toolchain prefix"
+	default ""
+
+choice
+	prompt "Bitfield order"
+	default TC_BIT_FIELD_ORDER_LITTLE_ENDIAN
+
+config TC_BIT_FIELD_ORDER_LITTLE_ENDIAN
+	bool "Little endian"
+
+config TC_BIT_FIELD_ORDER_BIG_ENDIAN
+	bool "Big endian"
+
+endchoice
+	
+config TC_CC
+	string "Toolchain gcc (C compiler)"
+	default "$(CONFIG_TC_PFX)gcc"
+
+config TC_AR
+	string "Toolchain ar (archive)"
+	default "$(CONFIG_TC_PFX)ar"
+
+config TC_RANLIB
+	string "Toolchain ranlib (generate index to archive)"
+	default "$(CONFIG_TC_PFX)ranlib"
+
+config TC_STRIP
+	string "Toolchain strip (discard symbols from obj)"
+	default "$(CONFIG_TC_PFX)strip"
+
+config TC_OBJDUMP
+	string "Toolchain objdump (display information from obj)"
+	default "$(CONFIG_TC_PFX)objdump"
+
+config TC_OBJCOPY
+	string "Toolchain objcopy (copy obj data)"
+	default "$(CONFIG_TC_PFX)objcopy"
+
+comment "(CAUTION) Shared CC flags. Do not change if u are not sure."
+
+config TC_EXTRA_CFLAGS
+	string "Extra CFLAGS"
+	default ""
+
+config TC_EXTRA_LDFLAGS
+	string "Extra LDFLAGS"
+	default ""
+
+config TC_EXTRA_LD_LIBRARY_PATH
+	string "Extra LD_LIBRARY_PATH"
+	default ""
+
+config TC_RUN_STRIP
+	bool "Run strip on object files"
+	default y
+
+config TC_RUN_OBJCOPY_KEEP_DEBUG
+	bool "(CAUTION) Generate 'objcopy --only-keep-debug' files at output files"
+	default n
+	depends on USER_SPACE
+
+config TC_RUN_STRIP_ARCHIVE
+	def_bool y if TC_RUN_STRIP && (!TC_RUN_OBJCOPY_KEEP_DEBUG)
+	def_bool n
+
+config TC_DISABLE_COLOR_OUTPUT
+	bool "Disable toolchain color output"
+	default n
+
+endmenu
+

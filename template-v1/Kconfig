@@ -1,0 +1,6 @@
+
+source "Kconfig.tc"
+
+source "src/Kconfig"
+
+#;
