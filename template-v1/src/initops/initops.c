@@ -7,12 +7,13 @@
 
 static int initops_dummy_init(void *unused)
 {
+	sync();
 	return 0;
 }
 
 static void initops_dummy_exit(void *unused)
 {
-	return;
+	sync();
 }
 
 DEFINE_INITOPS(initops_dummy, INITOPS_ORDER_MAX, initops_dummy_init, initops_dummy_exit, NULL);

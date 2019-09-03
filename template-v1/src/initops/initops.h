@@ -51,8 +51,8 @@ struct initops
 	{ .name = __name, .order = __order, .init = __init, .exit = __exit, .priv = __priv }
 
 #define DEFINE_INITOPS(_name, _order, _init, _exit, _priv) \
-	static struct initops _name = INITOPS_INITIALIZER(#_name, _order, _init, _exit, _priv); \
-	static struct initops * _name##_p __attribute__((section ("section_initops"))) = &(_name)
+	struct initops __initops_##_name = INITOPS_INITIALIZER(#_name, _order, _init, _exit, _priv); \
+	struct initops * __initops_##_name##_p __attribute__((section ("section_initops"))) = &(__initops_##_name)
 
 extern void initops_exec_exit(void);
 extern int initops_exec_init(void);
