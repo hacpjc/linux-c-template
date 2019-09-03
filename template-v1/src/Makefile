@@ -45,6 +45,9 @@ clean::
 	-@rm -vf $(obj-y:.o=.d)
 	-@rm -vf $(obj-y) $(exec)
 
+.PHONY: distclean
+distclean:: clean
+
 .PHONY: install
 install::
 	@$(call CMD_PREP_DIR,$(PRJ_DIR_PACK_BIN))
