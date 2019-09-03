@@ -163,7 +163,7 @@ CMD_STRIP = for f in $(2); do echo -e "\tSTRIP $$f"; $(1) $$f || exit 255; done;
 -include $(PRJ_PATH_AUTOCONF)
 
 ifeq ($(INTERNAL_ONE_TIME_EXPORT),)
-ifneq ($(TMCFG_TC_EXTRA_LD_LIBRARY_PATH),)
+ifneq ($(CONFIG_TC_EXTRA_LD_LIBRARY_PATH),)
 export INTERNAL_ONE_TIME_EXPORT := y
 export LD_LIBRARY_PATH := $(if $(LD_LIBRARY_PATH),$(LD_LIBRARY_PATH):)$(CONFIG_TC_EXTRA_LD_LIBRARY_PATH)
 endif
