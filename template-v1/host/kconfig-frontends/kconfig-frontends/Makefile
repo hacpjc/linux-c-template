@@ -35,6 +35,7 @@ msg:
 	@echo "...pkg-pfx: $(pkg-pfx)"
 	@echo "...stage-dir: $(stage-dir)"
 	@echo "...MY_OUTPUT: $(MY_OUTPUT)"
+	@echo "...MY_PREFIX: $(MY_PREFIX)"
 
 .PHONY: verify_depend
 verify_depend:
@@ -46,11 +47,17 @@ build_pkg:
 
 extract_pkg: $(stamp)
 
+opts :=
+opts += --disable-wall --disable-shared
+opts += --disable-nconf --disable-qconf --disable-gconf
+opts += --enable-config-prefix=$(MY_PREFIX)
+opts += --disable-L10n
+
 $(stamp):
 	@mkdir -vp $(stage-dir)
 	$(tar-cmd) $(pkg) -C $(stage-dir)
 	@test -d $(stage-dir)/$(pkg-pfx)
-	@cd $(stage-dir)/$(pkg-pfx) && ./configure --prefix=/usr --disable-nconf --disable-qconf --disable-gconf --enable-config-prefix=$(MY_PREFIX) --disable-wall --disable-shared --disable-L10n
+	@cd $(stage-dir)/$(pkg-pfx) && ./configure --prefix=/usr $(opts)
 	@touch $(stamp)
 
 .PHONY: clean
