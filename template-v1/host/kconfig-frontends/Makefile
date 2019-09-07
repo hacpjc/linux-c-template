@@ -4,7 +4,7 @@ INST_DIR := .inst
 .PHONY: all clean distclean 
 all:: 
 	@$(MAKE) -C kconfig-frontends
-	@$(MAKE) -C kconfig-frontends install MY_OUTPUT=$(CURDIR)/$(INST_DIR)
+	@$(MAKE) -C kconfig-frontends install MY_OUTPUT=$(CURDIR)/$(INST_DIR) MY_PREFIX=CONFIG_
 
 distclean::
 	@$(MAKE) -C kconfig-frontends distclean

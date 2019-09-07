@@ -50,7 +50,7 @@ $(stamp):
 	@mkdir -vp $(stage-dir)
 	$(tar-cmd) $(pkg) -C $(stage-dir)
 	@test -d $(stage-dir)/$(pkg-pfx)
-	@cd $(stage-dir)/$(pkg-pfx) && ./configure --prefix=/usr --disable-nconf --disable-qconf --disable-gconf --enable-config-prefix=$(MY_PREFIX) --disable-wall --disable-shared
+	@cd $(stage-dir)/$(pkg-pfx) && ./configure --prefix=/usr --disable-nconf --disable-qconf --disable-gconf --enable-config-prefix=$(MY_PREFIX) --disable-wall --disable-shared --disable-L10n
 	@touch $(stamp)
 
 .PHONY: clean

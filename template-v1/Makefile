@@ -92,8 +92,8 @@ prepare:: host
 menuconfig: verify_local_exec prepare
 	@echo "...Generating autoconf $(PRJ_PATH_AUTOCONF)"
 	@$(call CMD_FORBID_EMPTY_STR,PRJ_PATH_AUTOCONF,$(PRJ_PATH_AUTOCONF),Invalid symbol PRJ_PATH_AUTOCONF)
-	@-$(kconfig-menuconfig) $(kconfig-input)
-	@$(call CMD_CHECK_REG_FILE,$(kconfig-output))
+	$(kconfig-menuconfig) $(kconfig-input)
+	
 
 .PHONY: oldconfig
 oldconfig: silentoldconfig
