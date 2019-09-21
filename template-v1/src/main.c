@@ -12,43 +12,136 @@
 #include "lgu/lgu.h"
 #include "initops/initops.h"
 
+#include "mempool/mempool.h"
 #include "threadwq/threadwq.h"
+
+#include <time.h>
 
 static int cb_init(struct threadwq_worker *worker, void *unused)
 {
 	VBS("init worker %p", worker);
-	rcu_register_thread();
 	return 0;
 }
 
 static void cb_exit(struct threadwq_worker *worker, void *unused)
 {
 	VBS("exit worker %p", worker);
-	rcu_unregister_thread();
 }
+
+static unsigned long int wait = 0;
+static unsigned long int cnt = 0;
+static unsigned int job_sz = 0;
+
+void cb_func(struct threadwq_job *job, void *priv)
+{
+	/*
+	 * Do task
+	 */
+	cnt++;
+}
+
+static struct mempool mp;
+
+void cb_free(struct threadwq_job *job, void *priv)
+{
+	mempool_free(&mp, job);
+
+	uatomic_dec(&job_sz);
+}
+
 
 static void test_threadwq(void)
 {
-	struct threadwq twq;
+#define TWQNUM 4
+	struct timespec ts, ts_now;
+	struct threadwq twq[TWQNUM];
 
 	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init, NULL, cb_exit, NULL);
 
-	threadwq_init(&twq);
-
-	BUG_ON(threadwq_setup(&twq, 2, 16));
-	threadwq_set_ops(&twq, &twq_ops);
+	rcu_register_thread();
 
 	{
 		unsigned int i;
 
-		for (i = 0; i < 10; i++)
+		for (i = 0; i < TWQNUM; i++)
 		{
-			threadwq_add_job(&twq, &i);
-			usleep(100000);
+			threadwq_init(&twq[i]);
+			threadwq_set_ops(&twq[i], &twq_ops);
+			threadwq_exec(&twq[i]);
 		}
 	}
 
-	threadwq_exit(&twq);
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	{
+
+		struct threadwq_job *job;
+		const unsigned int max_job = 10;
+		unsigned int select_twq = 0;
+
+		mempool_init(&mp, "name", sizeof(*job), 128, NULL, NULL);
+
+		// max = 475656601
+		// cca_cpu_relax = 323674062
+		// mempool = 148476828
+		// malloc  = 270412123
+		// uatomic = 254584451
+		// mempool + cca_cpu_relax = 136757369
+		// mempool + job init      = 105684782
+		for (;;)
+		{
+			select_twq++;
+			if (select_twq >= TWQNUM)
+			{
+				select_twq = 0;
+			}
+
+			if (uatomic_read(&job_sz) > max_job)
+			{
+				clock_gettime(CLOCK_REALTIME, &ts_now);
+				if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+
+				usleep(100);
+				wait++;
+				continue;
+			}
+
+			job = mempool_alloc(&mp);
+			if (!job)
+			{
+				clock_gettime(CLOCK_REALTIME, &ts_now);
+				if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+
+				usleep(100);
+				wait++;
+				continue;
+			}
+
+			uatomic_inc(&job_sz);
+
+			threadwq_job_init(job, cb_func, cb_free, NULL);
+			threadwq_add_job(&twq[select_twq], job);
+
+			/*
+			 * xxx
+			 */
+			clock_gettime(CLOCK_REALTIME, &ts_now);
+			if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+		}
+
+		printf("cnt=%lu, wait=%lu\n", cnt, wait);
+	}
+
+	{
+		unsigned int i;
+
+		for (i = 0; i < TWQNUM; i++)
+		{
+			threadwq_exit(&twq[i]);
+		}
+	}
+
+	rcu_unregister_thread();
 
 	return;
 }

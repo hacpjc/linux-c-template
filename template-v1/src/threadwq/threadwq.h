@@ -10,38 +10,39 @@
 
 #include <urcu.h>
 #include <urcu/list.h>
+#include <urcu/rculfqueue.h> // lfq = lock-free queue
+
+#define THREADWQ_LFQ_CREATE_RCU_DATA (1) //!< Say 0 to disable rcu thread.
+#define THREADWQ_BLOCKED_ENQUEUE (1)
 
 struct threadwq_job
 {
-#define THREADWQ_JOB_PRIV_MAX 4
-	void *priv[THREADWQ_JOB_PRIV_MAX];
-	void (*func)(struct theadwq_job *job, void **priv);
+	void *priv;
+	void (*cb_func)(struct threadwq_job *job, void *priv);
+	void (*cb_free)(struct threadwq_job *job, void *priv);
+
+	struct rcu_head rcu_head;
+	struct cds_lfq_node_rcu lfq_node;
 };
 
-struct threadwq_worker
+static inline __attribute__((unused)) inline
+void threadwq_job_init(struct threadwq_job *job,
+	void (*cb_func)(struct threadwq_job *job, void *priv),
+	void (*cb_free)(struct threadwq_job *job, void *priv),
+	void *priv)
 {
-	unsigned int active;
-	unsigned int exit;
+	job->cb_func = cb_func;
+	job->cb_free = cb_free;
+	job->priv = priv;
 
-	pthread_t tid;
-	pthread_attr_t attr;
-	pthread_mutex_t mutex;
-
-	struct threadwq *twq;
-	struct cds_list_head list;
-
-	/*
-	 * job queue
-	 */
-	unsigned int queue_max;
-	struct threadwq_job *queue;
-};
+	cds_lfq_node_init_rcu(&job->lfq_node);
+}
 
 struct threadwq_ops
 {
-	int (*worker_init)(struct threadwq_worker *worker, void *priv);
+	int (*worker_init)(struct threadwq *twq, void *priv);
 	void *worker_init_priv;
-	void (*worker_exit)(struct threadwq_worker *worker, void *priv);
+	void (*worker_exit)(struct threadwq *twq, void *priv);
 	void *worker_exit_priv;
 };
 
@@ -50,20 +51,31 @@ struct threadwq_ops
 
 struct threadwq
 {
-	unsigned int worker_nr;
-	struct threadwq_worker *worker_tbl;
+	unsigned int exit;
+	unsigned int exit_ack;
+	unsigned int running;
 
+	pthread_t tid;
+	pthread_attr_t attr;
+	pthread_mutex_t mutex;
 	pthread_cond_t cond;
-	struct cds_list_head list;
+
+	struct cds_lfq_queue_rcu lfq;
 
 	struct threadwq_ops ops;
+
+	/*
+	 * stat
+	 */
 };
 
-void threadwq_set_ops(struct threadwq *twq, const struct threadwq_ops *ops);
-
-int threadwq_add_job(struct threadwq *twq, struct threadwq_job *job);
 int threadwq_init(struct threadwq *twq);
 void threadwq_exit(struct threadwq *twq);
-int threadwq_setup(struct threadwq *twq, const unsigned int worker_nr, const unsigned int worker_queue_max);
+void threadwq_set_ops(struct threadwq *twq, const struct threadwq_ops *ops);
+
+/*
+ * NOTE: Plz avoid infinitely adding job at caller side.
+ */
+void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job);
 
 #endif /* TEMPLATE_V1_SRC_THREADWQ_THREADWQ_H_ */
