@@ -6,9 +6,52 @@
 
 #include <getopt.h>
 
+#include <urcu.h>
+
 #include "generated/autoconf.h"
 #include "lgu/lgu.h"
 #include "initops/initops.h"
+
+#include "threadwq/threadwq.h"
+
+static int cb_init(struct threadwq_worker *worker, void *unused)
+{
+	VBS("init worker %p", worker);
+	rcu_register_thread();
+	return 0;
+}
+
+static void cb_exit(struct threadwq_worker *worker, void *unused)
+{
+	VBS("exit worker %p", worker);
+	rcu_unregister_thread();
+}
+
+static void test_threadwq(void)
+{
+	struct threadwq twq;
+
+	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init, NULL, cb_exit, NULL);
+
+	threadwq_init(&twq);
+
+	BUG_ON(threadwq_setup(&twq, 2, 16));
+	threadwq_set_ops(&twq, &twq_ops);
+
+	{
+		unsigned int i;
+
+		for (i = 0; i < 10; i++)
+		{
+			threadwq_add_job(&twq, &i);
+			usleep(100000);
+		}
+	}
+
+	threadwq_exit(&twq);
+
+	return;
+}
 
 static void print_help(const char *path)
 {
@@ -157,6 +200,8 @@ int main(int argc, char **argv)
 	}
 
 	DBG("Running program: %s", argv[0]);
+
+	test_threadwq();
 
 	return 0;
 }

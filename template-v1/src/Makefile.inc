@@ -15,6 +15,11 @@ obj-y += lgu/tm/tm.o
 obj-y += lgu/stdmsg/stdmsg.o
 
 #
+# threadwq
+#
+obj-y += threadwq/threadwq.o
+
+#
 # mempool
 #
 obj-y += mempool/mempool.o
@@ -31,6 +36,6 @@ my-cflags-y += -I$(PRJ_DIR_STAGE_INC)/tirpc
 my-ldflags-y :=
 my-ldflags-y += -L$(PRJ_DIR_STAGE_LIB)
 
-my-ldflags-y += -lpthread
+my-ldflags-y += -lpthread -lurcu
 
 #;
