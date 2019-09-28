@@ -27,6 +27,18 @@ void threadwq_set_ops(struct threadwq *twq, const struct threadwq_ops *ops)
 	memcpy(&twq->ops, ops, sizeof(*ops));
 }
 
+void threadwq_set_ops_multi(struct threadwq *twq_tbl, const struct threadwq_ops *ops, const unsigned int nr)
+{
+	unsigned int i;
+	struct threadwq *twq;
+
+	for (i = 0; i < nr; i++)
+	{
+		twq = &twq_tbl[i];
+		threadwq_set_ops(twq, ops);
+	}
+}
+
 int threadwq_init(struct threadwq *twq)
 {
 	twq->exit = 0;
@@ -50,6 +62,25 @@ int threadwq_init(struct threadwq *twq)
 	memset(&twq->ops, 0x00, sizeof(twq->ops));
 
 	return 0;
+}
+
+int threadwq_init_multi(struct threadwq *twq_tbl, const unsigned int nr)
+{
+	unsigned int i;
+	struct threadwq *twq;
+
+	for (i = 0; i < nr; i++)
+	{
+		twq = &twq_tbl[i];
+
+		if (threadwq_init(twq))
+		{
+			threadwq_exit_multi(twq_tbl, i);
+			return (nr - i) * (-1);
+		}
+	}
+
+	return 0; // ok
 }
 
 static void kill_online_worker(struct threadwq *twq)
@@ -85,6 +116,18 @@ void threadwq_exit(struct threadwq *twq)
 	kill_online_worker(twq);
 }
 
+void threadwq_exit_multi(struct threadwq *twq_tbl, const unsigned int nr)
+{
+	unsigned int i;
+	struct threadwq *twq;
+
+	for (i = 0; i < nr; i++)
+	{
+		twq = &twq_tbl[i];
+		threadwq_exit(twq);
+	}
+}
+
 static inline struct threadwq_job *dequeue_one_job(struct threadwq *twq)
 {
 	struct threadwq_job *job;
@@ -113,11 +156,36 @@ static void free_node_cb(struct rcu_head *head)
 	cb_free(job, job->priv);
 }
 
+
+#if THREADWQ_BLOCKED_ENQUEUE
+#define wait4job(_twq) \
+	{ \
+		pthread_mutex_lock(&twq->mutex); \
+		pthread_cond_wait(&twq->cond, &twq->mutex); \
+		pthread_mutex_unlock(&twq->mutex); \
+	}
+#elif THREADWQ_NONBLOCKED_ENQUEUE
+#if THREADWQ_NONBLOCKED_ENQUEUE_TIMEDWAIT
+#define wait4job(_twq) \
+	{ \
+		struct timespec ts; \
+		clock_gettime(CLOCK_REALTIME, &ts); \
+		ts.tv_sec = 0; \
+		ts.tv_nsec = THREADWQ_NONBLOCKED_ENQUEUE_TIMEDWAIT; \
+		pthread_mutex_lock(&twq->mutex); \
+		pthread_cond_wait(&twq->cond, &twq->mutex); \
+		pthread_mutex_unlock(&twq->mutex); \
+	}
+#else
+#define wait4job(_twq) caa_cpu_relax();
+#endif
+#else
+#error "fixme"
+#endif // THREADWQ_BLOCKED_ENQUEUE
+
 static void thread_func(void *in)
 {
 	struct threadwq *twq = in;
-
-	unsigned long int dequeue_peak = 0, dequeue = 0, sleep = 0, accl = 0;
 
 	rcu_register_thread();
 
@@ -135,53 +203,43 @@ static void thread_func(void *in)
 	twq->running = 1;
 	cmm_smp_mb();
 
-	while (twq->exit == 0)
 	{
-		struct threadwq_job *job;
-		dequeue = 0;
+		unsigned int accl = 0, idle = 0;
 
-		/*
-		 * dequeue job to do
-		 */
-		job = dequeue_one_job(twq);
-		while (job)
+		while (caa_unlikely(twq->exit == 0))
 		{
+			struct threadwq_job *job;
+
 			accl++;
-			dequeue++;
-			job->cb_func(job, job->priv);
-			call_rcu(&job->rcu_head, free_node_cb);
+			if (caa_unlikely(accl >= THREADWQ_STAT_PERIOD))
+			{
+				uatomic_set(&twq->busy, accl - idle);
+				accl = 0;
+				idle >>= 1;
+			}
 
-			job = dequeue_one_job(twq); // next job
+			/*
+			 * Dequeue & execute job.
+			 */
+			job = dequeue_one_job(twq);
+			if (caa_unlikely(!job))
+			{
+				idle++;
+				wait4job(twq);
+				continue; // no job
+			}
+
+			do
+			{
+				job->cb_func(job, job->priv);
+				call_rcu(&job->rcu_head, free_node_cb);
+
+				job = dequeue_one_job(twq); // next job
+			} while (job);
+
+			wait4job(twq);
 		}
-
-		if (dequeue > dequeue_peak)
-		{
-			dequeue_peak = dequeue;
-		}
-
-		/*
-		 * wait for next job
-		 */
-		sleep++;
-#if THREADWQ_BLOCKED_ENQUEUE
-		pthread_mutex_lock(&twq->mutex);
-		pthread_cond_wait(&twq->cond, &twq->mutex);
-		pthread_mutex_unlock(&twq->mutex);
-#else
-		{
-			struct timespec ts;
-			clock_gettime(CLOCK_REALTIME, &ts);
-			ts.tv_sec = 0;
-			ts.tv_nsec = 10 * 100000;
-
-			pthread_mutex_lock(&twq->mutex);
-			pthread_cond_timedwait(&twq->cond, &twq->mutex, &ts);
-			pthread_mutex_unlock(&twq->mutex);
-		}
-#endif
 	}
-
-	VBS("dequeue peak = %lu sleep %lu accl %lu", dequeue_peak, sleep, accl);
 
 	VBS("twq %p offline", twq);
 	if (twq->ops.worker_exit)
@@ -216,6 +274,24 @@ int threadwq_exec(struct threadwq *twq)
 	return 0; // ok
 }
 
+int threadwq_exec_multi(struct threadwq *twq_tbl, const unsigned int nr)
+{
+	unsigned int i;
+	struct threadwq *twq;
+
+	for (i = 0; i < nr; i++)
+	{
+		twq = &twq_tbl[i];
+
+		if (threadwq_exec(twq))
+		{
+			return (nr - i) * (-1);
+		}
+	}
+
+	return 0; // ok
+}
+
 void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job)
 {
 	BUG_ON(job == NULL);
@@ -231,8 +307,10 @@ void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job)
 	pthread_mutex_lock(&twq->mutex);
 	pthread_cond_signal(&twq->cond);
 	pthread_mutex_unlock(&twq->mutex);
-#else
+#elif THREADWQ_NONBLOCKED_ENQUEUE
 	pthread_cond_signal(&twq->cond);
+#else
+#error "fixme"
 #endif
 	return 0;
 }

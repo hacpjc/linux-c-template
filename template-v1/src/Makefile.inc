@@ -36,6 +36,6 @@ my-cflags-y += -I$(PRJ_DIR_STAGE_INC)/tirpc
 my-ldflags-y :=
 my-ldflags-y += -L$(PRJ_DIR_STAGE_LIB)
 
-my-ldflags-y += -lpthread -lurcu -lurcu-cds
+my-ldflags-y += -lpthread -lurcu -lurcu-cds -ljson-c
 
 #;

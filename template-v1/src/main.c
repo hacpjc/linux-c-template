@@ -17,13 +17,17 @@
 
 #include <time.h>
 
-static int cb_init(struct threadwq_worker *worker, void *unused)
+static unsigned int database[16384];
+
+static int cb_init_worker(struct threadwq_worker *worker, void *unused)
 {
 	VBS("init worker %p", worker);
+	memset(database, 0x00, sizeof(database));
+	database[16383] = 1;
 	return 0;
 }
 
-static void cb_exit(struct threadwq_worker *worker, void *unused)
+static void cb_exit_worker(struct threadwq_worker *worker, void *unused)
 {
 	VBS("exit worker %p", worker);
 }
@@ -32,12 +36,36 @@ static unsigned long int wait = 0;
 static unsigned long int cnt = 0;
 static unsigned int job_sz = 0;
 
+#include "json-c/json.h"
+
 void cb_func(struct threadwq_job *job, void *priv)
 {
 	/*
 	 * Do task
 	 */
-	cnt++;
+	uatomic_inc(&cnt);
+
+#if 0 // io-bound job, low cpu cost
+	{
+		struct json_object *jo = json_object_from_file("/tmp/ramfs/test.jon");
+
+		json_object_put(jo);
+	}
+#endif
+
+#if 1 // cpu-bound job, high cpu/memory cost... Time to prove the ability.
+	{
+		unsigned int i;
+
+		for (i = 0; i < 16384; i++)
+		{
+			if (database[i] == 1)
+			{
+				break;
+			}
+		}
+	}
+#endif
 }
 
 static struct mempool mp;
@@ -49,37 +77,23 @@ void cb_free(struct threadwq_job *job, void *priv)
 	uatomic_dec(&job_sz);
 }
 
-
-static void test_threadwq(void)
+#define TWQNUM 4 // CPU number.
+static void threadfunc(void *twqin)
 {
-#define TWQNUM 4
 	struct timespec ts, ts_now;
-	struct threadwq twq[TWQNUM];
-
-	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init, NULL, cb_exit, NULL);
+	struct threadwq *twq = twqin;
 
 	rcu_register_thread();
 
-	{
-		unsigned int i;
-
-		for (i = 0; i < TWQNUM; i++)
-		{
-			threadwq_init(&twq[i]);
-			threadwq_set_ops(&twq[i], &twq_ops);
-			threadwq_exec(&twq[i]);
-		}
-	}
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 
 	{
 
 		struct threadwq_job *job;
-		const unsigned int max_job = 10;
 		unsigned int select_twq = 0;
 
-		mempool_init(&mp, "name", sizeof(*job), 128, NULL, NULL);
+		mempool_init(&mp, "name", sizeof(*job), 65536 * 4, NULL, NULL);
 
 		// max = 475656601
 		// cca_cpu_relax = 323674062
@@ -88,6 +102,8 @@ static void test_threadwq(void)
 		// uatomic = 254584451
 		// mempool + cca_cpu_relax = 136757369
 		// mempool + job init      = 105684782
+		//
+		// result: 6757808
 		for (;;)
 		{
 			select_twq++;
@@ -96,23 +112,13 @@ static void test_threadwq(void)
 				select_twq = 0;
 			}
 
-			if (uatomic_read(&job_sz) > max_job)
-			{
-				clock_gettime(CLOCK_REALTIME, &ts_now);
-				if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
-
-				usleep(100);
-				wait++;
-				continue;
-			}
-
 			job = mempool_alloc(&mp);
 			if (!job)
 			{
 				clock_gettime(CLOCK_REALTIME, &ts_now);
 				if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
 
-				usleep(100);
+				caa_cpu_relax();
 				wait++;
 				continue;
 			}
@@ -129,19 +135,69 @@ static void test_threadwq(void)
 			if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
 		}
 
-		printf("cnt=%lu, wait=%lu\n", cnt, wait);
-	}
+		clock_gettime(CLOCK_REALTIME, &ts_now);
+		printf("%u thread:\ncnt=%lu, fail=%lu time=%u\n",
+			TWQNUM,
+			cnt, wait, (ts_now.tv_sec - ts.tv_sec));
 
-	{
-		unsigned int i;
-
-		for (i = 0; i < TWQNUM; i++)
-		{
-			threadwq_exit(&twq[i]);
-		}
+		cnt = 0;
+		wait = 0;
 	}
 
 	rcu_unregister_thread();
+}
+
+static void test_threadwq2(void)
+{
+	struct timespec ts, ts_now;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	for (;;)
+	{
+		cb_func(NULL, NULL);
+
+		/*
+		 * xxx
+		 */
+		clock_gettime(CLOCK_REALTIME, &ts_now);
+		if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+	}
+
+	clock_gettime(CLOCK_REALTIME, &ts_now);
+	printf("no thread:\ncnt=%lu, wait/waste=%lu time=%u\n", cnt, wait, (ts_now.tv_sec - ts.tv_sec));
+
+	cnt = 0;
+}
+
+static void test_threadwq(void)
+{
+	struct threadwq twq[TWQNUM];
+
+	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init_worker, NULL, cb_exit_worker, NULL);
+
+	BUG_ON(threadwq_init_multi(&twq, TWQNUM));
+	threadwq_set_ops_multi(&twq, &twq_ops, TWQNUM);
+
+	BUG_ON(threadwq_exec_multi(&twq, TWQNUM));
+
+	BUG_ON(create_all_cpu_call_rcu_data(0));
+
+	{ // Create another writer thread
+		pthread_t tid;
+		pthread_attr_t tattr;
+
+		pthread_attr_init(&tattr);
+
+		if (pthread_create(&tid, &tattr, threadfunc, twq))
+		{
+			BUG();
+		}
+
+		pthread_join(tid, NULL);
+	}
+
+	threadwq_exit_multi(&twq, TWQNUM);
 
 	return;
 }
@@ -294,7 +350,9 @@ int main(int argc, char **argv)
 
 	DBG("Running program: %s", argv[0]);
 
+	test_threadwq2();
 	test_threadwq();
+
 
 	return 0;
 }

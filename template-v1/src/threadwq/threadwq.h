@@ -13,7 +13,20 @@
 #include <urcu/rculfqueue.h> // lfq = lock-free queue
 
 #define THREADWQ_LFQ_CREATE_RCU_DATA (1) //!< Say 0 to disable rcu thread.
+
+/*
+ * Policy:
+ * - If this is not critical app, BLOCKED_ENQUEUE = 1
+ * - If this is critical, BLOCKED_ENQUEUE = 0
+ * - If this is very crital and allow more cpu usage: say ENQUEUE_TIMEDWAIT = 0.
+ */
 #define THREADWQ_BLOCKED_ENQUEUE (1)
+#if !THREADWQ_BLOCKED_ENQUEUE
+#define THREADWQ_NONBLOCKED_ENQUEUE (1)
+#define THREADWQ_NONBLOCKED_ENQUEUE_TIMEDWAIT (0) //!< 1 = 1 nanosecond, or 0 = cpu_relax
+#endif
+
+#define THREADWQ_STAT_PERIOD (1000) //!< Recommend: Use your max job size?
 
 struct threadwq_job
 {
@@ -64,18 +77,24 @@ struct threadwq
 
 	struct threadwq_ops ops;
 
-	/*
-	 * stat
-	 */
+	unsigned int busy;
 };
 
 int threadwq_init(struct threadwq *twq);
+int threadwq_init_multi(struct threadwq *twq_tbl, const unsigned int nr);
 void threadwq_exit(struct threadwq *twq);
+void threadwq_exit_multi(struct threadwq *twq_tbl, const unsigned int nr);
 void threadwq_set_ops(struct threadwq *twq, const struct threadwq_ops *ops);
+void threadwq_set_ops_multi(struct threadwq *twq_tbl, const struct threadwq_ops *ops, const unsigned int nr);
+int threadwq_exec(struct threadwq *twq);
+int threadwq_exec_multi(struct threadwq *twq_tbl, const unsigned int nr);
 
 /*
  * NOTE: Plz avoid infinitely adding job at caller side.
  */
 void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job);
+
+
+
 
 #endif /* TEMPLATE_V1_SRC_THREADWQ_THREADWQ_H_ */
