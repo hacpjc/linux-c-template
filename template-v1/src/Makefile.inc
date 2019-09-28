@@ -18,6 +18,8 @@ obj-y += lgu/stdmsg/stdmsg.o
 # threadwq
 #
 obj-y += threadwq/threadwq.o
+obj-y += threadwq/threadwq_man.o
+obj-y += threadwq/threadwq_man_rr.o
 
 #
 # mempool

@@ -19,17 +19,17 @@
 
 static unsigned int database[16384];
 
-static int cb_init_worker(struct threadwq_worker *worker, void *unused)
+static int cb_init_worker(struct threadwq *twq, void *unused)
 {
-	VBS("init worker %p", worker);
+	VBS("init twq %p", twq);
 	memset(database, 0x00, sizeof(database));
 	database[16383] = 1;
 	return 0;
 }
 
-static void cb_exit_worker(struct threadwq_worker *worker, void *unused)
+static void cb_exit_worker(struct threadwq *twq, void *unused)
 {
-	VBS("exit worker %p", worker);
+	VBS("exit twq %p", twq);
 }
 
 static unsigned long int wait = 0;
@@ -73,12 +73,11 @@ static struct mempool mp;
 void cb_free(struct threadwq_job *job, void *priv)
 {
 	mempool_free(&mp, job);
-
-	uatomic_dec(&job_sz);
 }
 
 #define TWQNUM 4 // CPU number.
-static void threadfunc(void *twqin)
+
+static void *threadfunc2(void *twqin)
 {
 	struct timespec ts, ts_now;
 	struct threadwq *twq = twqin;
@@ -123,8 +122,6 @@ static void threadfunc(void *twqin)
 				continue;
 			}
 
-			uatomic_inc(&job_sz);
-
 			threadwq_job_init(job, cb_func, cb_free, NULL);
 			threadwq_add_job(&twq[select_twq], job);
 
@@ -136,7 +133,7 @@ static void threadfunc(void *twqin)
 		}
 
 		clock_gettime(CLOCK_REALTIME, &ts_now);
-		printf("%u thread:\ncnt=%lu, fail=%lu time=%u\n",
+		printf("%u thread:\ncnt=%lu, fail=%lu time=%lu\n",
 			TWQNUM,
 			cnt, wait, (ts_now.tv_sec - ts.tv_sec));
 
@@ -145,9 +142,147 @@ static void threadfunc(void *twqin)
 	}
 
 	rcu_unregister_thread();
+	return NULL;
 }
 
+
 static void test_threadwq2(void)
+{
+	struct threadwq twq[TWQNUM];
+
+	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init_worker, NULL, cb_exit_worker, NULL);
+
+	BUG_ON(threadwq_init_multi(twq, TWQNUM));
+	threadwq_set_ops_multi(twq, &twq_ops, TWQNUM);
+
+	BUG_ON(threadwq_exec_multi(twq, TWQNUM));
+
+	BUG_ON(create_all_cpu_call_rcu_data(0));
+
+	{ // Create another writer thread
+		pthread_t tid;
+		pthread_attr_t tattr;
+
+		pthread_attr_init(&tattr);
+
+		if (pthread_create(&tid, &tattr, &threadfunc2, twq))
+		{
+			BUG();
+		}
+
+		pthread_join(tid, NULL);
+	}
+
+	threadwq_exit_multi(twq, TWQNUM);
+
+	return;
+}
+
+static void *threadfunc3(void *twqmanin)
+{
+	struct timespec ts, ts_now;
+	struct threadwq_man *man = twqmanin;
+
+	rcu_register_thread();
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	{
+
+		struct threadwq_job *job;
+		unsigned int accl = 0;
+
+		mempool_init(&mp, "name", sizeof(*job), 65536 * 4, NULL, NULL);
+
+		// max = 475656601
+		// cca_cpu_relax = 323674062
+		// mempool = 148476828
+		// malloc  = 270412123
+		// uatomic = 254584451
+		// mempool + cca_cpu_relax = 136757369
+		// mempool + job init      = 105684782
+		//
+		// result: 6757808
+		for (;;)
+		{
+			job = mempool_alloc(&mp);
+			if (!job)
+			{
+				clock_gettime(CLOCK_REALTIME, &ts_now);
+				if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+
+				caa_cpu_relax();
+				wait++;
+				continue;
+			}
+
+			accl++;
+
+			threadwq_job_init(job, cb_func, cb_free, NULL);
+			BUG_ON(threadwq_man_add_job(man, job));
+
+			/*
+			 * xxx
+			 */
+			clock_gettime(CLOCK_REALTIME, &ts_now);
+			if ((ts_now.tv_sec - ts.tv_sec) > 10) break;
+		}
+
+		clock_gettime(CLOCK_REALTIME, &ts_now);
+		printf("%u thread:\ncnt=%lu, expect=%u, fail=%lu time=%lu\n",
+			TWQNUM,
+			cnt, accl, wait, (ts_now.tv_sec - ts.tv_sec));
+
+		cnt = 0;
+		wait = 0;
+	}
+
+	rcu_unregister_thread();
+
+	return NULL;
+}
+
+static void test_threadwq3(void)
+{
+	struct threadwq twq[TWQNUM];
+
+	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init_worker, NULL, cb_exit_worker, NULL);
+
+	struct threadwq_man twq_man;
+
+	BUG_ON(threadwq_init_multi(twq, TWQNUM));
+	threadwq_set_ops_multi(twq, &twq_ops, TWQNUM);
+
+	BUG_ON(threadwq_exec_multi(twq, TWQNUM));
+
+
+	BUG_ON(threadwq_man_init(&twq_man, twq, TWQNUM, &threadwq_man_ops_rr));
+
+
+	BUG_ON(create_all_cpu_call_rcu_data(0));
+
+	{ // Create another writer thread
+		pthread_t tid;
+		pthread_attr_t tattr;
+
+		pthread_attr_init(&tattr);
+
+		if (pthread_create(&tid, &tattr, &threadfunc3, &twq_man))
+		{
+			BUG();
+		}
+
+		pthread_join(tid, NULL);
+	}
+
+	threadwq_exit_multi(twq, TWQNUM);
+
+	threadwq_man_exit(&twq_man);
+
+	return;
+}
+
+static void test_threadwq(void)
 {
 	struct timespec ts, ts_now;
 
@@ -165,41 +300,9 @@ static void test_threadwq2(void)
 	}
 
 	clock_gettime(CLOCK_REALTIME, &ts_now);
-	printf("no thread:\ncnt=%lu, wait/waste=%lu time=%u\n", cnt, wait, (ts_now.tv_sec - ts.tv_sec));
+	printf("no thread:\ncnt=%lu, wait/waste=%lu time=%lu\n", cnt, wait, (ts_now.tv_sec - ts.tv_sec));
 
 	cnt = 0;
-}
-
-static void test_threadwq(void)
-{
-	struct threadwq twq[TWQNUM];
-
-	struct threadwq_ops twq_ops = THREQDWQ_OPS_INITIALIZER(cb_init_worker, NULL, cb_exit_worker, NULL);
-
-	BUG_ON(threadwq_init_multi(&twq, TWQNUM));
-	threadwq_set_ops_multi(&twq, &twq_ops, TWQNUM);
-
-	BUG_ON(threadwq_exec_multi(&twq, TWQNUM));
-
-	BUG_ON(create_all_cpu_call_rcu_data(0));
-
-	{ // Create another writer thread
-		pthread_t tid;
-		pthread_attr_t tattr;
-
-		pthread_attr_init(&tattr);
-
-		if (pthread_create(&tid, &tattr, threadfunc, twq))
-		{
-			BUG();
-		}
-
-		pthread_join(tid, NULL);
-	}
-
-	threadwq_exit_multi(&twq, TWQNUM);
-
-	return;
 }
 
 static void print_help(const char *path)
@@ -350,8 +453,10 @@ int main(int argc, char **argv)
 
 	DBG("Running program: %s", argv[0]);
 
-	test_threadwq2();
+
 	test_threadwq();
+	test_threadwq2();
+	test_threadwq3();
 
 
 	return 0;

@@ -146,14 +146,14 @@ static inline struct threadwq_job *dequeue_one_job(struct threadwq *twq)
 	return job;
 }
 
-static void free_node_cb(struct rcu_head *head)
+static void __exec_finish_rcu(struct rcu_head *head)
 {
 	struct threadwq_job *job =
 		caa_container_of(head, struct threadwq_job, rcu_head);
-	void (*cb_free)(struct threadwq_job *job, void *priv);
+	void (*cb_finish)(struct threadwq_job *job, void *priv);
 
-	cb_free = job->cb_free;
-	cb_free(job, job->priv);
+	cb_finish = job->cb_finish;
+	cb_finish(job, job->priv);
 }
 
 
@@ -183,7 +183,7 @@ static void free_node_cb(struct rcu_head *head)
 #error "fixme"
 #endif // THREADWQ_BLOCKED_ENQUEUE
 
-static void thread_func(void *in)
+static void *thread_func(void *in)
 {
 	struct threadwq *twq = in;
 
@@ -231,8 +231,8 @@ static void thread_func(void *in)
 
 			do
 			{
-				job->cb_func(job, job->priv);
-				call_rcu(&job->rcu_head, free_node_cb);
+				job->cb_start(job, job->priv);
+				call_rcu(&job->rcu_head, __exec_finish_rcu);
 
 				job = dequeue_one_job(twq); // next job
 			} while (job);
@@ -251,6 +251,8 @@ static void thread_func(void *in)
 	cmm_smp_mb();
 
 	rcu_unregister_thread();
+
+	return NULL;
 }
 
 int threadwq_exec(struct threadwq *twq)
@@ -292,25 +294,3 @@ int threadwq_exec_multi(struct threadwq *twq_tbl, const unsigned int nr)
 	return 0; // ok
 }
 
-void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job)
-{
-	BUG_ON(job == NULL);
-
-	rcu_read_lock();
-	cds_lfq_enqueue_rcu(&twq->lfq, &job->lfq_node);
-	rcu_read_unlock();
-
-	/*
-	 * * NOTE: If the worker is not waiting, we might get a latency.
-	 */
-#if THREADWQ_BLOCKED_ENQUEUE
-	pthread_mutex_lock(&twq->mutex);
-	pthread_cond_signal(&twq->cond);
-	pthread_mutex_unlock(&twq->mutex);
-#elif THREADWQ_NONBLOCKED_ENQUEUE
-	pthread_cond_signal(&twq->cond);
-#else
-#error "fixme"
-#endif
-	return 0;
-}

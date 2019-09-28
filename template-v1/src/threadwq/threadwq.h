@@ -12,6 +12,10 @@
 #include <urcu/list.h>
 #include <urcu/rculfqueue.h> // lfq = lock-free queue
 
+#include "lgu/lgu.h"
+
+#include "threadwq/threadwq_man.h"
+
 #define THREADWQ_LFQ_CREATE_RCU_DATA (1) //!< Say 0 to disable rcu thread.
 
 /*
@@ -31,8 +35,8 @@
 struct threadwq_job
 {
 	void *priv;
-	void (*cb_func)(struct threadwq_job *job, void *priv);
-	void (*cb_free)(struct threadwq_job *job, void *priv);
+	void (*cb_start)(struct threadwq_job *job, void *priv);
+	void (*cb_finish)(struct threadwq_job *job, void *priv);
 
 	struct rcu_head rcu_head;
 	struct cds_lfq_node_rcu lfq_node;
@@ -40,12 +44,12 @@ struct threadwq_job
 
 static inline __attribute__((unused)) inline
 void threadwq_job_init(struct threadwq_job *job,
-	void (*cb_func)(struct threadwq_job *job, void *priv),
-	void (*cb_free)(struct threadwq_job *job, void *priv),
+	void (*cb_start)(struct threadwq_job *job, void *priv),
+	void (*cb_finish)(struct threadwq_job *job, void *priv),
 	void *priv)
 {
-	job->cb_func = cb_func;
-	job->cb_free = cb_free;
+	job->cb_start = cb_start;
+	job->cb_finish = cb_finish;
 	job->priv = priv;
 
 	cds_lfq_node_init_rcu(&job->lfq_node);
@@ -89,12 +93,28 @@ void threadwq_set_ops_multi(struct threadwq *twq_tbl, const struct threadwq_ops 
 int threadwq_exec(struct threadwq *twq);
 int threadwq_exec_multi(struct threadwq *twq_tbl, const unsigned int nr);
 
-/*
- * NOTE: Plz avoid infinitely adding job at caller side.
- */
-void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job);
+static inline __attribute__((unused))
+void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job)
+{
+	BUG_ON(job == NULL);
 
+	rcu_read_lock();
+	cds_lfq_enqueue_rcu(&twq->lfq, &job->lfq_node);
+	rcu_read_unlock();
 
+	/*
+	 * * NOTE: If the worker is not waiting, we might get a latency.
+	 */
+#if THREADWQ_BLOCKED_ENQUEUE
+	pthread_mutex_lock(&twq->mutex);
+	pthread_cond_signal(&twq->cond);
+	pthread_mutex_unlock(&twq->mutex);
+#elif THREADWQ_NONBLOCKED_ENQUEUE
+	pthread_cond_signal(&twq->cond);
+#else
+#error "fixme"
+#endif
+}
 
 
 #endif /* TEMPLATE_V1_SRC_THREADWQ_THREADWQ_H_ */
