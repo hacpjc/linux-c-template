@@ -14,12 +14,6 @@
 #include "lgu/lgu.h"
 #include "threadwq.h"
 
-static unsigned int cpu_affinities[64];
-static unsigned int next_aff = 0;
-static int use_affinity = 0;
-
-pthread_mutex_t affinity_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 void threadwq_set_ops(struct threadwq *twq, const struct threadwq_ops *ops)
 {
 	BUG_ON(ops->worker_exit == NULL || ops->worker_init == NULL);
@@ -177,11 +171,37 @@ static void __exec_finish_rcu(struct rcu_head *head)
 		pthread_mutex_unlock(&twq->mutex); \
 	}
 #else
-#define wait4job(_twq) caa_cpu_relax();
+/*
+ * TBD: Choose one. sched is more friendly. relax is w/ better throughput.
+ */
+#define wait4job(_twq) caa_cpu_relax()
 #endif
 #else
 #error "fixme"
 #endif // THREADWQ_BLOCKED_ENQUEUE
+
+static inline unsigned int exec_pending_jobs(struct threadwq *twq)
+{
+	struct threadwq_job *job;
+	unsigned int accl = 0;
+
+	job = dequeue_one_job(twq);
+	if (caa_unlikely(!job))
+	{
+		return 0;
+	}
+
+	do
+	{
+		accl++;
+		job->cb_start(job, job->priv);
+		call_rcu(&job->rcu_head, __exec_finish_rcu);
+
+		job = dequeue_one_job(twq); // next job
+	} while (job);
+
+	return accl;
+}
 
 static void *thread_func(void *in)
 {
@@ -204,33 +224,29 @@ static void *thread_func(void *in)
 	cmm_smp_mb();
 
 	{
-		unsigned int accl = 0, idle = 0;
+		unsigned int cnt = 0, busy = 0;
+		struct threadwq_job *job;
 
 		while (caa_unlikely(twq->exit == 0))
 		{
-			struct threadwq_job *job;
-
-			accl++;
-			if (caa_unlikely(accl >= THREADWQ_STAT_PERIOD))
+			cnt++;
+			if (caa_unlikely(cnt >= THREADWQ_STAT_PERIOD))
 			{
-				uatomic_set(&twq->busy, accl - idle);
-				accl = 0;
-				idle >>= 1;
+				uatomic_set(&twq->busy, busy);
+				cnt = 0;
+				busy >>= 1;
 			}
 
-			/*
-			 * Dequeue & execute job.
-			 */
 			job = dequeue_one_job(twq);
 			if (caa_unlikely(!job))
 			{
-				idle++;
 				wait4job(twq);
-				continue; // no job
+				continue;
 			}
 
 			do
 			{
+				busy++;
 				job->cb_start(job, job->priv);
 				call_rcu(&job->rcu_head, __exec_finish_rcu);
 
@@ -239,6 +255,11 @@ static void *thread_func(void *in)
 
 			wait4job(twq);
 		}
+
+		/*
+		 * Got a signal to exit. Flush queue.
+		 */
+		exec_pending_jobs(twq);
 	}
 
 	VBS("twq %p offline", twq);
@@ -270,7 +291,12 @@ int threadwq_exec(struct threadwq *twq)
 	{
 		if (twq->running) break;
 
+		/* Choose one. */
+#if 0
 		caa_cpu_relax();
+#else
+		sched_yield();
+#endif
 	}
 
 	return 0; // ok

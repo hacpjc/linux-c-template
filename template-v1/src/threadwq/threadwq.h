@@ -94,6 +94,21 @@ int threadwq_exec(struct threadwq *twq);
 int threadwq_exec_multi(struct threadwq *twq_tbl, const unsigned int nr);
 
 static inline __attribute__((unused))
+void threadwq_add_job_locked(struct threadwq *twq, struct threadwq_job *job)
+{
+	/*
+	 * Assume the mutex is acquired by caller.
+	 */
+	BUG_ON(job == NULL);
+
+	rcu_read_lock();
+	cds_lfq_enqueue_rcu(&twq->lfq, &job->lfq_node);
+	rcu_read_unlock();
+
+//	pthread_cond_signal(&twq->cond); // CAUTION: Plz send signal at caller, too.
+}
+
+static inline __attribute__((unused))
 void threadwq_add_job(struct threadwq *twq, struct threadwq_job *job)
 {
 	BUG_ON(job == NULL);
