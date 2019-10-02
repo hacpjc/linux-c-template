@@ -12,9 +12,9 @@ MY_PREFIX ?= "CONFIG_"
 pkg := $(shell ls import/*.tar.xz | sort -r | head -n 1)
 pkg-pfx := $(notdir $(patsubst %.tar.xz,%,$(pkg)))
 
-stage-dir := "$(CURDIR)/.stage-$(pkg-pfx)"
+stage-dir := $(CURDIR)/.stage-$(pkg-pfx)
 
-stamp := ".stamp-$(pkg-pfx)"
+stamp := .stamp-$(pkg-pfx)
 
 tar-cmd := tar -Jxvf
 
@@ -43,9 +43,9 @@ verify_depend:
 	@which yacc
 
 build_pkg:
-	@$(MAKE) -C $(stage-dir)/$(pkg-pfx)
+	@$(MAKE) -C "$(stage-dir)/$(pkg-pfx)"
 
-extract_pkg: $(stamp)
+extract_pkg: $(stage-dir)/$(pkg-pfx)
 
 opts :=
 opts += --disable-wall --disable-shared
@@ -53,23 +53,23 @@ opts += --disable-nconf --disable-qconf --disable-gconf
 opts += --enable-config-prefix=$(MY_PREFIX)
 opts += --disable-L10n
 
-$(stamp):
-	@mkdir -vp $(stage-dir)
-	$(tar-cmd) $(pkg) -C $(stage-dir)
-	@test -d $(stage-dir)/$(pkg-pfx)
-	@cd $(stage-dir)/$(pkg-pfx) && ./configure --prefix=/usr $(opts)
-	@touch $(stamp)
+$(stage-dir)/$(pkg-pfx): $(pkg)
+	@mkdir -vp "$(stage-dir)"
+	$(tar-cmd) $(pkg) -C "$(stage-dir)"
+	@test -d "$(stage-dir)/$(pkg-pfx)"
+	@cd "$(stage-dir)/$(pkg-pfx)" && ./configure --prefix=/usr $(opts)	
 
 .PHONY: clean
 clean:
-	-rm -rf $(stage-dir) $(stamp) .output
+	-rm -rf "$(stage-dir)" "$(stamp)" .output
 
 .PHONY: distclean
 distclean: clean
 
 .PHONY: install
 install:
-	@test -d $(stage-dir)/$(pkg-pfx)
-	@DESTDIR=$(MY_OUTPUT) $(MAKE) -C $(stage-dir)/$(pkg-pfx) install
+	@test -d "$(stage-dir)/$(pkg-pfx)"
+	@DESTDIR="$(MY_OUTPUT)" $(MAKE) -C "$(stage-dir)/$(pkg-pfx)" install
+	
 
 #;
