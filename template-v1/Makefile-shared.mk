@@ -6,7 +6,7 @@ $(error Invalid symbol MAKE. Not possible!?)
 endif
 
 #
-# INC_MAKEFILE_IN_DIR 
+# INC_MAKEFILE_IN_DIR
 # Include a Makefile in a specified sub-directory. Pop an error if no directory is given.
 # 1: The directory to include
 #
@@ -19,7 +19,7 @@ endif
 endef
 
 #
-# FORBID_EMPTY_SYMBOL 
+# FORBID_EMPTY_SYMBOL
 # Check for a Makefile symbol. Pop an error if it's empty.
 # 1: Symbol left value (name)
 # 2: Symbol right value (value)
@@ -31,13 +31,36 @@ $$(error Invalid symbol $(1). $(3))
 endif
 endef
 
+define DEFINE_GENERAL_TARGET
+#
+# general
+#
+.PHONY: all
+all::
+
+.PHONY: clean
+clean::
+
+.PHONY: install
+install::
+
+.PHONY: distclean
+distclean::
+
+.PHONY: mrproper
+mrproper:: distclean
+
+.PHONY: release
+release::
+endef
+
 #
 # CMD_MAKE_ALL_DIR_NOSP
 # Run make on specified directory list. Every directory path must not contain a space.
 # 1: The directories to run "make"
 # 2: The command/target to run at Makefile.
 #
-CMD_MAKE_ALL_DIR_NOSP = if [ ! "$(1)" = "" ]; then for d in $(1); do if [ ! -d "$$d" ]; then echo " * ERROR: $$d is not a directory" && exit 255; fi; echo "...Enter dir: $$d" && $(MAKE) -C $$d $(2) || exit 255; done; fi;
+CMD_MAKE_ALL_DIR_NOSP = if [ ! "$(1)" = "" ]; then for d in $(1); do if [ ! -d "$$d" ]; then echo " * ERROR: $$d is not a directory" && exit 255; fi; echo -e "\n...Running: $(MAKE) -C $(1) $(2)\n" && $(MAKE) -C $$d $(2) || exit 255; done; fi;
 
 #
 # CMD_MAKE_DIR_NOSP
@@ -45,7 +68,7 @@ CMD_MAKE_ALL_DIR_NOSP = if [ ! "$(1)" = "" ]; then for d in $(1); do if [ ! -d "
 # 1: The directory to run "make"
 # 2: The command/target to run at Makefile.
 #
-CMD_MAKE_DIR_NOSP = if [ ! "$(1)" = "" ]; then if [ ! -d "$(1)" ]; then echo " * ERROR: $(1) is not a directory" && exit 255; fi; echo "...Enter dir: $(1)" && $(MAKE) -C $(1) $(2) || exit 255; fi;
+CMD_MAKE_DIR_NOSP = if [ ! "$(1)" = "" ]; then if [ ! -d "$(1)" ]; then echo " * ERROR: $(1) is not a directory" && exit 255; fi; echo -e "\n...Running: $(MAKE) -C $(1) $(2)\n" && $(MAKE) -C $(1) $(2) || exit 255; fi;
 
 #
 # CMD_MAKE_LINUX
@@ -106,6 +129,11 @@ CMD_CP_NOSP_R = if [ -d "$(2)" ]; then cp -prvf $(1) "$(2)"; else echo " * ERROR
 CMD_CP_NOSP = if [ -d "$(2)" ]; then cp -pvf $(1) "$(2)"; else echo " * ERROR: $(2) is not a directory."; exit 255; fi
 
 #
+# CMD_CP2F_NOSP
+#
+CMD_CP2F_NOSP = if [ -f "$(1)" ]; then cp -pvf "$(1)" "$(2)"; else echo " * ERROR: $(1) is not a file."; exit 255; fi
+
+#
 # CMD_SOFTLINK_NOSP
 # Link (soft) file(s) into a specified directory.
 # 1: The input files.
@@ -163,10 +191,16 @@ CMD_STRIP = for f in $(2); do echo -e "\tSTRIP $$f"; $(1) $$f || exit 255; done;
 -include $(PRJ_PATH_AUTOCONF)
 
 ifeq ($(INTERNAL_ONE_TIME_EXPORT),)
-ifneq ($(CONFIG_TC_EXTRA_LD_LIBRARY_PATH),)
 export INTERNAL_ONE_TIME_EXPORT := y
+
+ifneq ($(CONFIG_TC_EXTRA_LD_LIBRARY_PATH),)
 export LD_LIBRARY_PATH := $(if $(LD_LIBRARY_PATH),$(LD_LIBRARY_PATH):)$(CONFIG_TC_EXTRA_LD_LIBRARY_PATH)
 endif
+
+ifneq ($(CONFIG_TC_EXTRA_BIN_PATH),)
+export PATH := $(if $(PATH),$(PATH):)$(CONFIG_TC_EXTRA_BIN_PATH)
 endif
+
+endif # INTERNAL_ONE_TIME_EXPORT
 
 #;

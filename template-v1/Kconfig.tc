@@ -62,6 +62,10 @@ config TC_EXTRA_LD_LIBRARY_PATH
 	string "Extra LD_LIBRARY_PATH"
 	default ""
 
+config TC_EXTRA_BIN_PATH
+	string "Extra PATH"
+	default ""
+
 config TC_RUN_STRIP
 	bool "Run strip on object files"
 	default y

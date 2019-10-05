@@ -53,22 +53,5 @@ install::
 	@$(call CMD_PREP_DIR,$(PRJ_DIR_PACK_BIN))
 	@$(call CMD_CP_NOSP,$(exec),$(PRJ_DIR_PACK_BIN))
 
-#
-# general
-#
-.PHONY: all
-all::
-
-.PHONY: clean
-clean::
-
-.PHONY: distclean
-distclean::
-
-.PHONY: install
-install::
-
-.PHONY: release
-relase::
-
+$(eval $(call DEFINE_GENERAL_TARGET))
 #;

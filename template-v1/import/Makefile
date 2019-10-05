@@ -1,32 +1,15 @@
+include $(PRJ_MK_SHARED)
 
 include $(CURDIR)/Makefile.inc
-
 subdir := $(subdir-y)
 
-.PHONY: all 
-all:: 
-	@$(foreach d,$(subdir),$(MAKE) -C $(d) $@ && $(MAKE) -C $(d) install || ext 255;)
+.PHONY: default
+default:
+	@$(foreach d,$(subdir),$(MAKE) -C $(d) || exit 255;)
 
-.PHONY: clean distclean
-clean distclean::
-	@$(foreach d,$(subdir),$(MAKE) -C $(d) $@ || ext 255;)
+.PHONY: $(MAKECMDGOALS)
+$(MAKECMDGOALS):: 
+	@$(foreach d,$(subdir),$(MAKE) -C $(d) $@ || exit 255;)
 
-#
-# general
-#
-.PHONY: all
-all::
-
-.PHONY: clean
-clean::
-
-.PHONY: distclean
-distclean::
-
-.PHONY: install
-install::
-
-.PHONY: release
-relase::
-
+$(eval $(call DEFINE_GENERAL_TARGET))
 #;

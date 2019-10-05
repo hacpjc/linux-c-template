@@ -162,6 +162,10 @@ $(1)_install::
 $(1)_distclean::
 	@$$(call CMD_MAKE_ALL_DIR_NOSP,$$($(1)-dir-y),distclean) 
 
+.PHONY: $(1)_mrproper
+$(1)_mrproper::
+	@$$(call CMD_MAKE_ALL_DIR_NOSP,$$($(1)-dir-y),mrproper)
+
 .PHONY: $(1)_release
 $(1)_release::
 	@$$(call CMD_MAKE_ALL_DIR_NOSP,$$($(1)-dir-y),release)
@@ -176,6 +180,9 @@ clean:: $(1)_clean
 .PHONY: distclean
 distclean:: $(1)_distclean
 
+.PHONY: mrproper
+mrproper:: $(1)_mrproper
+
 .PHONY: install
 install:: $(1)_install
 
@@ -186,28 +193,24 @@ endef # subdir_target_tpl
 
 subdir-y :=
 subdir-y += $(PRJ_DIR_HOST)
+ifeq ($(d),)
 subdir-y += $(PRJ_DIR_IMPORT)
 subdir-y += $(PRJ_DIR_SRC)
+endif
+
 $(foreach d,$(subdir-y),$(eval $(call subdir_target_tpl,$(notdir $(d)))))
 
+ifneq ($(d),)
+# Allow development syntax: make d=userspace/busybox all install
+.PHONY: all
+$(if $(MAKECMDGOALS), $(MAKECMDGOALS), all):: verify_local_exec oldconfig verify_autoconf_output
+	$(MAKE) -C "$(d)" $(MAKECMDGOALS)
+endif
 
 #
 # All general phony targets should be defined here.
 #
-.PHONY: all
-all::
-
-.PHONY: clean
-clean::
-
-.PHONY: install
-install::
-
-.PHONY: distclean
-distclean::
-
-.PHONY: release
-release::
+$(eval $(call DEFINE_GENERAL_TARGET))
 
 #
 # release utility: release purge (stand-alone target)
@@ -224,7 +227,7 @@ release_verify:
 	@echo "...Check package directory $(PRJ_DIR_PACK)"
 	@$(call CMD_CHECK_DIR,$(PRJ_DIR_PACK))
 
-package_name_pfx := template_nfspxy
+package_name_pfx := templatev1
 
 package_ver := v0.0
 package_date := $(shell date "+%Y%m%d")
