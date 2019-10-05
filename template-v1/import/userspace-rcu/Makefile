@@ -32,7 +32,7 @@ LDFLAGS += $(my-ldflags-y)
 # all
 # 
 .PHONY: all
-all: lib_build lib_install
+all:: lib_build lib_install
 
 #
 # liburcu
@@ -75,15 +75,10 @@ lib_distclean: lib_clean
 	rm -rvf $(urcu-folder)
 
 .PHONY: clean
-clean: lib_clean
+clean:: lib_clean
 
 .PHONY: distclean
-distclean: lib_distclean
+distclean:: lib_distclean
 
-.PHONY: install
-install:
-
-.PHONY: release
-release:
-
+$(eval $(call DEFINE_GENERAL_TARGET))
 #;
