@@ -93,6 +93,7 @@ menuconfig: verify_local_exec prepare
 	@echo "...Generating autoconf $(PRJ_PATH_AUTOCONF)"
 	@$(call CMD_FORBID_EMPTY_STR,PRJ_PATH_AUTOCONF,$(PRJ_PATH_AUTOCONF),Invalid symbol PRJ_PATH_AUTOCONF)
 	$(kconfig-menuconfig) $(kconfig-input)
+	@if [ -f .config ]; then $(MAKE) -C $(CURDIR) oldconfig; fi
 	
 
 .PHONY: oldconfig
